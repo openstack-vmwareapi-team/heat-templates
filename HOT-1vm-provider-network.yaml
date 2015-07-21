@@ -1,0 +1,43 @@
+heat_template_version: 2013-05-23
+
+description: >
+   A simple Heat template that creates a VM and attaches it to an existing provider network.
+
+# Create command: heat stack-create <stack-name> --template-file=<path-to-this-file> --parameters="flavor_name=<flavor-name>;image_name=<image-name>;provider_net_id=<provider network UUID>"
+
+parameters:
+  flavor_name:
+    type: string
+    label: flavor name
+    description: Name of the flavor to be used for the instances.
+  image_name:
+    type: string
+    label: image name
+    description: Name of the image from which to create the instances.
+  provider_net_id:
+    type: string
+    label: external network id
+    description: ID of the provider network to which the instance has to be connected.
+
+resources:
+   instance1_port1:
+      type: OS::Neutron::Port
+      properties:
+         admin_state_up: true
+         network_id: { get_param: provider_net_id }
+         security_groups:
+            - default
+
+   instance1:
+      type: OS::Nova::Server
+      properties:
+         name: instance1
+         image: { get_param: image_name }
+         flavor:  { get_param: flavor_name }
+         networks:
+            - port: { get_resource: instance1_port1 }
+
+outputs:
+   instance1_private_ip:
+      description: Fixed IP address of instance1 on the private network.
+      value: { get_attr: [ instance1, first_address] }

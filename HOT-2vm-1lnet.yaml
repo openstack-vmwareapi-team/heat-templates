@@ -1,0 +1,71 @@
+heat_template_version: 2013-05-23
+
+description: >
+  A simple Heat template that spins up 2 instances and a private network.
+
+# Create command: heat stack-create <stack-name> --template-file=<path-to-this-file> --parameters="flavor_name=<flavor-name>;image_name=<image-name>"
+
+parameters:
+  flavor_name:
+    type: string
+    label: flavor name
+    description: Name of the flavor to be used for the instances.
+  image_name:
+    type: string
+    label: image name
+    description: Name of the image from which to create the instances.
+
+resources:
+  lnet_1:
+    type: OS::Neutron::Net
+    properties:
+      admin_state_up: true
+      name: lnet_1
+
+  subnet_1:
+    type: OS::Neutron::Subnet
+    properties:
+      name: subnet_1
+      cidr: 10.10.10.0/24
+      enable_dhcp: true
+      network_id: { get_resource: lnet_1 }
+
+  instance1_port1:
+    type: OS::Neutron::Port
+    properties:
+      admin_state_up: true
+      network_id: { get_resource: lnet_1 }
+      security_groups:
+        - default
+  instance2_port1:
+    type: OS::Neutron::Port
+    properties:
+      admin_state_up: true
+      network_id: { get_resource: lnet_1 }
+      security_groups:
+        - default
+
+  instance1:
+    type: OS::Nova::Server
+    properties:
+      name: instance_1
+      image: { get_param: image_name }
+      flavor:  { get_param: flavor_name }
+      networks:
+        - port: { get_resource: instance1_port1 }
+  instance2:
+    type: OS::Nova::Server
+    properties:
+      name: instance_2
+      image: { get_param: image_name }
+      flavor:  { get_param: flavor_name }
+      networks:
+        - port: { get_resource: instance2_port1 }
+
+outputs:
+   instance1_ip:
+      description: Fixed IP address of instance1 on the private network.
+      value: { get_attr: [ instance1, first_address] }
+   instance2_ip:
+      description: Fixed IP address of instance2 on the private network.
+      value: { get_attr: [ instance2, first_address] }
