@@ -1,0 +1,138 @@
+heat_template_version: 2013-05-23
+
+description: Template that installs a wordpress server.
+
+parameters:
+  image:
+    type: string
+    label: Image name or ID
+    description: Image to be used for server. Please use an Ubuntu based image.
+    default: ubuntu-14.04-server-amd64
+  flavor:
+    type: string
+    label: Flavor
+    description: Type of instance (flavor) to be used on the compute instance.
+    default: m1.small
+  key:
+    type: string
+    label: Key name
+    description: Name of key-pair to be used for compute instance
+    default: vioKey
+  wordpress_network_id:
+    type: string
+    label: Private wordpress network ID
+    description: Network to attach server to.
+    default: private
+  mysql_server:
+    type: string
+    label: MySQL database server IP address
+    description: IP address of the MySQL database server.
+  database_name:
+    type: string
+    label: Database name
+    description: Name of the application database.
+  database_user:
+    type: string
+    label: Database user
+    description: Name of the database user.
+  database_password:
+    type: string
+    label: Database password
+    hidden: true
+    description: Password to access the database.
+  volume_count:
+    type: number
+    label: Number of volumes
+    description: Number of volumes to attach to server
+    default: 0
+    constraints:
+      - range: {min: 0, max: 10}
+  volume_size:
+    type: number
+    description: Size of volume to attach to server
+    default: 1
+
+resources:
+  security_group:
+      type: OS::Neutron::SecurityGroup
+      properties:
+        name: wordpress_security_group
+        rules:
+          - protocol: tcp
+            port_range_min: 80
+            port_range_max: 80
+          - protocol: tcp
+            port_range_min: 22
+            port_range_max: 22
+
+  port:
+    type: OS::Neutron::Port
+    properties:
+      network_id: { get_param: wordpress_network_id }
+      security_groups:
+        - { get_resource: security_group }
+
+  wordpress_instance:
+    type: OS::Nova::Server
+    properties:
+      name: wordpress
+      image: { get_param: image }
+      flavor: { get_param: flavor }
+      key_name: { get_param: key }
+      networks:
+        - port: { get_resource: port }
+      user_data_format: RAW
+      user_data:
+        str_replace:
+          params:
+            __mysql_ip__: { get_param: mysql_server }
+            __database_name__: { get_param: database_name }
+            __database_user__: { get_param: database_user }
+            __database_password__: password
+          template: |
+            #!/bin/bash -ex
+            
+             # fix remote ssh issues
+            dpkg-reconfigure openssh-server
+            ip link set eth0 mtu 1400
+
+            # install dependencies
+            apt-get update
+            apt-get -y install apache2 php5 libapache2-mod-php5 php5-mysql php5-gd mysql-client
+
+            # download wordpress
+            wget http://wordpress.org/latest.tar.gz
+            tar -xzf latest.tar.gz
+
+            # configure wordpress
+            cp wordpress/wp-config-sample.php wordpress/wp-config.php
+            sed -i 's/database_name_here/__database_name__/' wordpress/wp-config.php
+            sed -i 's/username_here/__database_user__/' wordpress/wp-config.php
+            sed -i 's/password_here/__database_password__/' wordpress/wp-config.php
+            sed -i 's/localhost/__mysql_ip__/' wordpress/wp-config.php
+
+            # install a copy of the configured wordpress into apache's www directory
+            rm /var/www/html/index.html
+            cp -R wordpress/* /var/www/html/
+
+            # give apache ownership of the application files
+            chown -R www-data:www-data /var/www/html/
+            chmod -R g+w /var/www/html/
+
+  wordpress_volumes:
+    type: OS::Heat::ResourceGroup
+    properties:
+      count: {get_param: volume_count}
+      resource_def:
+        type: volume_with_attachment.yaml
+        properties:
+          instance_id: {get_resource: wordpress_instance}
+          volume_size: {get_param: volume_size}
+
+outputs:
+  ip:
+    description: The IP address of the wordpress instance.
+    value: { get_attr: [wordpress_instance, first_address] }
+  port:
+    description: The network port of the wordpress instance.
+    value: { get_resource: port }

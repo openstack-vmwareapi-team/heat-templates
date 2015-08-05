@@ -1,0 +1,141 @@
+heat_template_version: 2013-05-23
+
+description: Template that installs a HAProxy server.
+
+parameters:
+  image:
+    type: string
+    label: Image name or ID
+    description: Image to be used for server. Please use an Ubuntu based image.
+    default: ubuntu-14.04-server-amd64
+  flavor:
+    type: string
+    label: Flavor
+    description: Type of instance (flavor) to be used on the compute instance.
+    default: m1.small
+  key:
+    type: string
+    label: Key name
+    description: Name of key-pair to be installed on the compute instance.
+    default: vioKey
+  private_network_id:
+    type: string
+    label: Private network ID
+    description: Network to attach server to.
+    default: private
+  servers:
+    type: comma_delimited_list
+    label: Servers
+    description: Comma separated list of servers in the cluster.
+    default: []
+  volume_count:
+    type: number
+    label: Number of volumes
+    description: Number of volumes to attach to server
+    default: 0
+    constraints:
+      - range: {min: 0, max: 10}
+  volume_size:
+    type: number
+    description: Size of volume to attach to server
+    default: 1
+
+resources:
+  security_group:
+      type: OS::Neutron::SecurityGroup
+      properties:
+        name: web_server_security_group
+        rules:
+          - protocol: tcp
+            port_range_min: 80
+            port_range_max: 80
+          - protocol: tcp
+            port_range_min: 22
+            port_range_max: 22
+
+  port:
+    type: OS::Neutron::Port
+    properties:
+      network: { get_param: private_network_id }
+      security_groups:
+        - { get_resource: security_group }
+      replacement_policy: AUTO
+
+  haproxy_instance:
+    type: OS::Nova::Server
+    properties:
+      name: haproxy
+      image: { get_param: image }
+      flavor: { get_param: flavor }
+      key_name: { get_param: key }
+      networks:
+        - port: { get_resource: port }
+      metadata:
+        servers: { get_param: servers }
+      user_data_format: RAW
+      user_data:
+        str_replace:
+          params:
+            __f__: /etc/haproxy/haproxy.cfg
+          template: |
+            #!/bin/bash -ex
+            dpkg-reconfigure openssh-server
+            ip link set eth0 mtu 1400
+            apt-get update
+            apt-get -y install curl build-essential python python-dev python-virtualenv supervisor haproxy
+            sed -i 's/LED=0/LED=1/' /etc/default/haproxy
+            cp __f__ __f__g
+            cat >>/etc/haproxy/servers.json <<EOF
+            []
+            EOF
+            cat >>/etc/haproxy/update.py <<EOF
+            import sys
+            import json
+            import subprocess
+            metadata = json.loads(sys.stdin.read())
+            ns = json.loads(metadata.get('meta', {}).get('servers', '[]'))
+            if not ns:
+                sys.exit(1)
+            cs = json.loads(open('/etc/haproxy/servers.json').read())
+            if cs == ns:
+                sys.exit(0) 
+            open('/etc/haproxy/servers.json', 'wt').write(json.dumps(ns))
+            f = open('__f__', 'wt')
+            f.write(open('__f__g').read())
+            f.write("""
+            listen app *:80
+                mode http
+                balance roundrobin
+                option httpclose
+                option forwardfor
+            """)
+            for i, server in enumerate(ns):
+                f.write('    server server-{0} {1}:80\n'.format(i, server))
+            f.close()
+            subprocess.call(['service', 'haproxy', 'reload'])
+            EOF
+            crontab -l >_crontab || true
+            echo "* * * * * curl -s http://169.254.169.254/openstack/latest/meta_data.json | python /etc/haproxy/update.py | /usr/bin/logger -t haproxy_update" >>_crontab
+            crontab <_crontab
+            rm _crontab
+
+  haproxy_volumes:
+    type: OS::Heat::ResourceGroup
+    properties:
+      count: {get_param: volume_count}
+      resource_def:
+        type: volume_with_attachment.yaml
+        properties:
+          instance_id: {get_resource: haproxy_instance}
+          volume_size: {get_param: volume_size}
+
+outputs:
+  name:
+    description: Name of the HAProxy instance.
+    value: { get_attr: [haproxy_instance, name] }
+  ip:
+    description: The IP address of the HAProxy instance.
+    value: { get_attr: [haproxy_instance, first_address] }
+  port:
+    description: The network port of the HAProxy instance.
+    value: { get_resource: port }

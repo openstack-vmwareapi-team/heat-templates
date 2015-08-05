@@ -1,0 +1,102 @@
+heat_template_version: 2013-05-23
+ 
+description: Template that installs wordpress cluster with load balancer and supporting MySQL database running on separate server
+
+# Required sub templates : lib/wordpress_networks.yaml, lib/mysql.yaml, lib/wordpress.yaml, lib/floating_ip.yaml, lib/haproxy.yaml, lib/volume_with_attachment.yaml
+# Note : Due to metadata key/value length limitation (255 characters), please comment line "servers: { get_attr: [wordpress_cluster, ip] }" if wordpress_cluster_size > 15 
+ 
+parameters:
+  wordpress_cluster_size:
+    type: number
+    description: Wordpress instance number 
+    default: 1
+  image:
+    type: string
+    label: Image name or ID
+    description: Image to be used for server. Please use an Ubuntu based image.
+    default: ubuntu-14.04-server-amd64
+  flavor:
+    type: string
+    label: Flavor
+    description: Type of instance (flavor) to be used on the compute instance.
+    default: m1.small
+  key:
+    type: string
+    label: Key name
+    description: Name of key-pair to be installed on the compute instance.
+    default: vioKey
+  public_network_id:
+    type: string
+    label: Public network ID
+    description: Public network to attach server to.
+    default: public
+  volume_count:
+    type: number
+    label: Number of volumes
+    description: Number of volumes to attach to server
+    default: 0
+    constraints:
+      - range: {min: 0, max: 10}
+  volume_size:
+    type: number
+    description: Size of volume to attach to server
+    default: 1
+ 
+resources:
+  network:
+    type: lib/wordpress_networks.yaml
+    properties:
+      public_network: { get_param: public_network_id }
+
+  mysql:
+    type: lib/mysql.yaml
+    properties:
+      volume_count: { get_param: volume_count }
+      volume_size: { get_param: volume_size }
+      image: { get_param: image }
+      flavor: { get_param: flavor }
+      key: { get_param: key }
+      db_network_id: { get_attr: [network, db_net_id] }
+      database_name: wordpress
+      database_user: wordpress_user
+ 
+  wordpress_cluster:
+    type: OS::Heat::ResourceGroup
+    properties:
+      count: { get_param: wordpress_cluster_size }
+      resource_def:
+        type: lib/wordpress.yaml
+        properties:
+          volume_count: { get_param: volume_count }
+          volume_size: { get_param: volume_size }
+          image: { get_param: image }
+          flavor: { get_param: flavor }
+          key: { get_param: key }
+          wordpress_network_id: { get_attr: [network, wordpress_net_id] }
+          mysql_server: { get_attr: [mysql, ip] }
+          database_name: wordpress
+          database_user: wordpress_user
+          database_password: { get_attr: [mysql, database_password] }
+
+  load_balancer:
+    type: lib/haproxy.yaml
+    properties:
+      volume_count: { get_param: volume_count }
+      volume_size: { get_param: volume_size }
+      image: { get_param: image }
+      flavor: { get_param: flavor }
+      key: { get_param: key }
+      private_network_id: { get_attr: [network, wordpress_net_id] }
+      servers: { get_attr: [wordpress_cluster, ip] }
+
+  floating_ip:
+    type: lib/floating_ip.yaml 
+    depends_on: load_balancer
+    properties:
+      port_id: { get_attr: [load_balancer, port] }
+      public_network_id: { get_param: public_network_id }
+
+outputs:
+  ip:
+    description: The public IP address to access the server.
+    value: { get_attr: [floating_ip, ip] }
