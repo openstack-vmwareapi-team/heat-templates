@@ -7,7 +7,7 @@ Heat templates to install wordpress application through VMware Integrated Openst
 
 1.1) Network topology
 ------------------------------------------------------
-![WordPress Setup Topology](doc-images/heat_wp.tiff)
+![WordPress Setup Topology](doc-images/heat_wp.png)
 
 1.2) Validation - http://floating_ip_address , a wordpress installation page shows up.
 
@@ -16,7 +16,7 @@ Heat templates to install wordpress application through VMware Integrated Openst
 
 2.1) Network topology
 ------------------------------------------------------
-![WordPress HA Setup Topology](doc-images/heat_wp_ha.tiff)
+![WordPress HA Setup Topology](doc-images/heat_wp_ha.png)
 
 2.2) Instances under private network "wordpress_network":
 A wordpress cluster plus one load balancer. Floating ip is associated with load balancer.
